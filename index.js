@@ -116,9 +116,31 @@ function addExtensions(server) {
 
 function setupSocketIO(server) {
     server.app.logger.info("setting up socket.io");
-    server.io = socketIO(server.listener);
-    server.io.on("connection", (socket) => {
-        server.app.logger.info("socket.io connected");
+    server.app.io = socketIO(server.listener);
+    server.app.socketsByGarageDoorId = {};
+
+    server.app.io.on("connection", socket => {
+        socket.on("registerGarageDoorOpener", garageDoorId => {
+            server.app.socketsByGarageDoorId[garageDoorId] = socket;
+            console.log("socket.io connected", garageDoorId);
+
+            socket.emit("getGarageDoorStatus", null, status => {
+                server.app.logger.info("Garage door is initially ", status);
+
+                socket.on("garageDoorStatus", status => {
+                    server.app.logger.info("Garage door is now ", status);
+                });
+
+                socket.on("disconnect", () => {
+                    if (server.app.socketsByGarageDoorId.hasOwnProperty(garageDoorId) && server.app.socketsByGarageDoorId[garageDoorId].id === socket.id) {
+                        server.app.logger.info("socket.io disconnected", garageDoorId);
+                        delete server.app.socketsByGarageDoorId[garageDoorId];
+                    } else {
+                        server.app.logger.info("socket.io disconnection ignored because replacement connection has already been established", garageDoorId);
+                    }
+                });
+            });
+        });
     });
 }
 
