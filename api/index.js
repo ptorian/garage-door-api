@@ -163,6 +163,20 @@ function setupSocketIO(server) {
         }
     };
 
+    const onGarageDoorHeartbeat = async (garageDoorId) => {
+        const uow = new UoW();
+        await uow.beginTransaction();
+        try {
+            const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(garageDoorId);
+            garageDoor.last_seen_date = new Date();
+            await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
+            await uow.commitTransaction();
+        } catch (e) {
+            server.app.logger.error(e);
+            await uow.rollbackTransaction();
+        }
+    }
+
     const onGarageDoorStatusUpdated = async (garageDoorId, status) => {
         const uow = new UoW();
         await uow.beginTransaction();
@@ -207,6 +221,10 @@ function setupSocketIO(server) {
 
             socket.emit("getGarageDoorStatus", null, async status => {
                 await onGarageDoorStatusUpdated(garageDoorId, status);
+
+                socket.on("heartbeat", async () => {
+                    await onGarageDoorHeartbeat(garageDoorId);
+                });
 
                 socket.on("garageDoorStatus", async status => {
                     await onGarageDoorStatusUpdated(garageDoorId, status);
