@@ -1,3 +1,4 @@
 module.exports = {
-    UsersRepository: require("./usersRepository")
+    UsersRepository: require("./usersRepository"),
+    GarageDoorsRepository: require("./garageDoorsRepository")
 };

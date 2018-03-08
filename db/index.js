@@ -1,5 +1,5 @@
 const {knex, Model} = require("./connect");
-const {UsersRepository} = require("./repositories");
+const repositories = require("./repositories");
 const models = require("./models");
 
 class UnitOfWork {
@@ -10,8 +10,12 @@ class UnitOfWork {
         this._transaction = null;
     }
 
+    get garageDoorsRepository() {
+        return new repositories.GarageDoorsRepository(this);
+    }
+
     get usersRepository() {
-        return new UsersRepository(this);
+        return new repositories.UsersRepository(this);
     }
 
     async beginTransaction() {

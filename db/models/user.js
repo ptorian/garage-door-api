@@ -8,8 +8,8 @@ class User extends Model {
             type: "object",
             properties: {
                 id: {type: "integer"},
-                email: {type: "text"},
-                password: {type: "text"},
+                email: {type: "string"},
+                password: {type: "string"},
                 is_active: {type: "boolean"},
                 last_activity_date: {type: ["object", "null"]},
             }
