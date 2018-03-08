@@ -103,7 +103,9 @@ function addExtensions(server) {
             });
 
             if (request.app.isAuthenticated && request.response.header != null) {
-                const tokenPayload = {};
+                const tokenPayload = {
+                    user_id: 1
+                };
 
                 const token = jwt.sign(tokenPayload, request.server.app.jwtKey, {expiresIn: config.jwtValidTimespan});
                 request.response.header("Authorization", `Bearer ${token}`);
