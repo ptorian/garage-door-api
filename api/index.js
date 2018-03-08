@@ -7,6 +7,7 @@ require("winston-daily-rotate-file");
 
 const routes = require("./routes");
 const config = require("./config");
+const UoW = require("../db");
 
 
 const appRawFileTransport = new winston.transports.DailyRotateFile({
@@ -76,13 +77,42 @@ async function registerRoutes(server) {
 }
 
 function addExtensions(server) {
-    const piProvider = null;
     server.ext({
         type: "onRequest",
         method: (request, h) => {
-            request.app.getPiProvider = () => {
-                return piProvider;
+            request.app.uows = [];
+
+            request.app.getNewUoW = () => {
+                const uow = new UoW();
+                request.app.uows.push(uow);
+                return uow;
             };
+
+            return h.continue;
+        }
+    });
+
+    server.ext({
+        type: "onPostAuth",
+        method: async (request, h) => {
+            if (request.auth.isAuthenticated) {
+                const uow = await request.app.getNewUoW();
+                request.app.currentUser = await uow.usersRepository.getUserById(request.auth.credentials.currentUser.id);
+            }
+
+            return h.continue;
+        }
+    });
+
+    server.ext({
+        type: "onPostHandler",
+        method: async (request, h) => {
+            for (const uow of request.app.uows) {
+                if (uow.inTransaction) {
+                    request.server.app.logger.warn("Auto transaction rollback");
+                    await uow.rollbackTransaction();
+                }
+            }
 
             return h.continue;
         }
@@ -102,9 +132,9 @@ function addExtensions(server) {
                 code: request.response.statusCode
             });
 
-            if (request.app.isAuthenticated && request.response.header != null) {
+            if (request.app.currentUser != null && request.response.header != null) {
                 const tokenPayload = {
-                    user_id: 1
+                    currentUserId: request.app.currentUser.id
                 };
 
                 const token = jwt.sign(tokenPayload, request.server.app.jwtKey, {expiresIn: config.jwtValidTimespan});

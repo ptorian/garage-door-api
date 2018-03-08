@@ -1,0 +1,20 @@
+{
+  "name": "garage-door-db",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "knex": "^0.14.4",
+    "lodash": "^4.17.5",
+    "moment": "^2.21.0",
+    "objection": "^1.0.0",
+    "pg": "^7.4.1",
+    "uuid": "^3.2.1"
+  }
+}
