@@ -5,13 +5,13 @@ const routes = [
     {
         method: 'GET',
         path:'/users',
-        handler: async (request, reply) => {
+        handler: async (request, h) => {
             const uow = await request.app.getNewUoW();
             const users = await uow.usersRepository.getAllUsers();
 
             users.forEach(x => x.password = null);
 
-            reply(users);
+            return users;
         }
     },
     {

@@ -1,4 +1,5 @@
 const UoW = require("../../db");
+const config = require("../config");
 
 /*
     If the raw status is 1 (closed) and changes to a 0 (open), then the status is set to "opening" and a timer
@@ -15,11 +16,20 @@ const UoW = require("../../db");
 
 const garageDoorOpenerSocketHandlersByGarageDoorId = {};
 
+function getGarageDoorOpenerSocketHandlerByGarageDoorId(garageDoorId) {
+    return garageDoorOpenerSocketHandlersByGarageDoorId.hasOwnProperty(garageDoorId.toLowerCase()) ? garageDoorOpenerSocketHandlersByGarageDoorId[garageDoorId.toLowerCase()] : null;
+}
+
 class GarageDoorOpenerSocketHandler {
     constructor(logger, socket, garageDoorId) {
         this.logger = logger;
         this.socket = socket;
-        this.garageDoorId = garageDoorId;
+        this.garageDoorId = garageDoorId.toLowerCase();
+        this.openingTimer = null;
+    }
+
+    async triggerOpener() {
+        this.socket.emit("toggleGarageDoorState");
     }
 
     async onGarageDoorConnected() {
@@ -41,29 +51,51 @@ class GarageDoorOpenerSocketHandler {
         }
     }
 
-    async onGarageDoorStatusUpdated(status) {
-        const uow = new UoW();
-        await uow.beginTransaction();
-        try {
-            const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(this.garageDoorId);
-            garageDoor.status = status === 1 ? "closed" : "open";
-            garageDoor.last_seen_date = new Date();
-            await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
-            const mostRecentGarageDoorStatusHistoryEntry = await uow.garageDoorsRepository.getMostRecentGarageDoorStatusHistoryEntryForGarageDoor(this.garageDoorId);
-            if (mostRecentGarageDoorStatusHistoryEntry == null || mostRecentGarageDoorStatusHistoryEntry.raw_status !== status) {
-                const newGarageDoorStatusHistoryEntry = {
-                    garage_door_id: this.garageDoorId,
-                    status: garageDoor.status,
-                    raw_status: status,
-                    activity_date: new Date()
-                };
-                await uow.garageDoorsRepository.addGarageDoorStatusHistoryEntry(newGarageDoorStatusHistoryEntry);
+    async onGarageDoorStatusUpdated(rawStatus) {
+
+        const setStatus = async (status) => {
+            const uow = new UoW();
+            await uow.beginTransaction();
+            try {
+                const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(this.garageDoorId);
+                garageDoor.status = status;
+                garageDoor.last_seen_date = new Date();
+                await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
+                const mostRecentGarageDoorStatusHistoryEntry = await uow.garageDoorsRepository.getMostRecentGarageDoorStatusHistoryEntryForGarageDoor(this.garageDoorId);
+                if (mostRecentGarageDoorStatusHistoryEntry == null || mostRecentGarageDoorStatusHistoryEntry.raw_status !== status) {
+                    const newGarageDoorStatusHistoryEntry = {
+                        garage_door_id: this.garageDoorId,
+                        status: garageDoor.status,
+                        raw_status: rawStatus,
+                        activity_date: new Date()
+                    };
+                    await uow.garageDoorsRepository.addGarageDoorStatusHistoryEntry(newGarageDoorStatusHistoryEntry);
+                }
+                await uow.commitTransaction();
+            } catch (e) {
+                this.logger.error(e);
+                await uow.rollbackTransaction();
             }
-            await uow.commitTransaction();
-        } catch (e) {
-            this.logger.error(e);
-            await uow.rollbackTransaction();
+        };
+
+        let openingTimer = null;
+
+        if (rawStatus === 0) {
+            if (openingTimer == null) {
+                await setStatus("opening");
+
+                this.openingTimer = setTimeout(async () => {
+                    await setStatus("open");
+                    this.openingTimer = null;
+                }, config.openingTimespan);
+            }
+        } else {
+            await setStatus("closed");
+            if (this.openingTimer != null) {
+                clearTimeout(this.openingTimer);
+            }
         }
+
     }
 
     async onGarageDoorHeartbeat() {
@@ -94,4 +126,4 @@ class GarageDoorOpenerSocketHandler {
     };
 }
 
-module.exports = GarageDoorOpenerSocketHandler;
+module.exports = {GarageDoorOpenerSocketHandler, getGarageDoorOpenerSocketHandlerByGarageDoorId};

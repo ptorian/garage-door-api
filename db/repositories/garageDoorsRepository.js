@@ -5,6 +5,14 @@ class GarageDoors {
         this.uow = uow;
     }
 
+    async getAllGarageDoors() {
+        const q = this.uow._models.GarageDoor
+            .query(this.uow._transaction);
+
+        const garageDoors = await q;
+        return garageDoors;
+    }
+
     async ensureGarageDoorExists(garageDoorId) {
         const garageDoor = await this.getGarageDoorById(garageDoorId);
         if (garageDoor != null) {

@@ -1,29 +1,34 @@
+const Joi = require("joi");
+
+const {getGarageDoorOpenerSocketHandlerByGarageDoorId} = require("../sockets/garageDoorOpenerSocketHandler");
+
 const routes = [
     {
         method: "GET",
-        path: "/garage-door/status",
-        handler: (request, h) => {
-            return new Promise((resolve, reject) => {
-                const firstSocket = Object.values(request.server.app.socketsByGarageDoorId)[0];
-                if (firstSocket == null) {
-                    resolve(h.response({"message": "No connected garage door openers"}).code(400));
-                } else {
-                    firstSocket.emit("getGarageDoorStatus", null, status => {
-                        resolve({open: status === 0});
-                    });
-                }
-            });
+        path: "/garage-doors",
+        handler: async (request, h) => {
+            const uow = await request.app.getNewUoW();
+            const garageDoors = await uow.garageDoorsRepository.getAllGarageDoors();
+
+            return garageDoors;
         }
     },
     {
         method: "POST",
-        path: "/garage-door/opener/trigger",
+        path: "/garage-doors/{garageDoorId}/trigger-opener",
+        config: {
+            validate: {
+                params: {
+                    garageDoorId: Joi.string().required()
+                }
+            }
+        },
         handler: (request, h) => {
-            const firstSocket = Object.values(request.server.app.socketsByGarageDoorId)[0];
-            if (firstSocket == null) {
-                return h.response({"message": "No connected garage door openers"}).code(400);
+            const garageDoorOpenerSocketHandler = getGarageDoorOpenerSocketHandlerByGarageDoorId(request.params.garageDoorId);
+            if (garageDoorOpenerSocketHandler == null) {
+                return h.response("").code(404);
             } else {
-                firstSocket.emit("toggleGarageDoorState");
+                garageDoorOpenerSocketHandler.triggerOpener();
                 return "";
             }
         }

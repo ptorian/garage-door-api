@@ -8,7 +8,7 @@ require("winston-daily-rotate-file");
 const routes = require("./routes");
 const config = require("./config");
 const UoW = require("../db");
-const GarageDoorOpenerSocketHandler = require("./sockets/garageDoorOpenerSocketHandler");
+const {GarageDoorOpenerSocketHandler} = require("./sockets/garageDoorOpenerSocketHandler");
 
 
 const appRawFileTransport = new winston.transports.DailyRotateFile({
