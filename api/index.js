@@ -9,6 +9,7 @@ const routes = require("./routes");
 const config = require("./config");
 const UoW = require("../db");
 const {GarageDoorOpenerSocketHandler} = require("./sockets/garageDoorOpenerSocketHandler");
+const {ClientSocketHandler} = require("./sockets/clientSocketHandler");
 
 
 const appRawFileTransport = new winston.transports.DailyRotateFile({
@@ -154,7 +155,11 @@ function setupSocketIO(server) {
     server.app.io.on("connection", socket => {
         socket.on("registerGarageDoorOpener", async garageDoorId => {
             const garageDoorOpenerSocketHandler = new GarageDoorOpenerSocketHandler(server.app.logger, socket, garageDoorId);
-            await garageDoorOpenerSocketHandler.onGarageDoorConnected();
+            await garageDoorOpenerSocketHandler.onConnect();
+        });
+        socket.on("registerClient", async () => {
+            const clientSocketHandler = new ClientSocketHandler(server.app.logger, socket);
+            await clientSocketHandler.onConnect();
         });
     });
 }

@@ -1,5 +1,6 @@
 const UoW = require("../../db");
 const config = require("../config");
+const {getAllClients} = require("./clientSocketHandler");
 
 /*
     If the raw status is 1 (closed) and changes to a 0 (open), then the status is set to "opening" and a timer
@@ -32,9 +33,9 @@ class GarageDoorOpenerSocketHandler {
         this.socket.emit("toggleGarageDoorState");
     }
 
-    async onGarageDoorConnected() {
+    async onConnect() {
         try {
-            this.logger.info("socket.io connected", this.garageDoorId);
+            this.logger.info("socket.io garage door connected", this.garageDoorId);
             garageDoorOpenerSocketHandlersByGarageDoorId[this.garageDoorId] = this;
 
             const uow = new UoW();
@@ -44,7 +45,7 @@ class GarageDoorOpenerSocketHandler {
                 await this.onGarageDoorStatusUpdated(status);
                 this.socket.on("heartbeat", () => this.onGarageDoorHeartbeat());
                 this.socket.on("garageDoorStatus", status => this.onGarageDoorStatusUpdated(status));
-                this.socket.on("disconnect", () => this.onGarageDoorDisconnected());
+                this.socket.on("disconnect", () => this.onDisconnect());
             });
         } catch (e) {
             this.logger.error(e);
@@ -72,6 +73,7 @@ class GarageDoorOpenerSocketHandler {
                     await uow.garageDoorsRepository.addGarageDoorStatusHistoryEntry(newGarageDoorStatusHistoryEntry);
                 }
                 await uow.commitTransaction();
+                getAllClients().forEach(x => x.sendGarageDoorUpdates());
             } catch (e) {
                 this.logger.error(e);
                 await uow.rollbackTransaction();
@@ -106,19 +108,20 @@ class GarageDoorOpenerSocketHandler {
             garageDoor.last_seen_date = new Date();
             await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
             await uow.commitTransaction();
+            getAllClients().forEach(x => x.sendGarageDoorUpdates());
         } catch (e) {
             this.logger.error(e);
             await uow.rollbackTransaction();
         }
     }
 
-    async onGarageDoorDisconnected() {
+    async onDisconnect() {
         try {
             if (garageDoorOpenerSocketHandlersByGarageDoorId.hasOwnProperty(this.garageDoorId) && garageDoorOpenerSocketHandlersByGarageDoorId[this.garageDoorId].socket.id === this.socket.id) {
-                logger.info("socket.io disconnected", this.garageDoorId);
+                logger.info("socket.io garage door disconnected", this.garageDoorId);
                 delete garageDoorOpenerSocketHandlersByGarageDoorId[this.garageDoorId];
             } else {
-                this.logger.info("socket.io disconnection ignored because replacement connection has already been established", this.garageDoorId);
+                this.logger.info("socket.io garage door disconnection ignored because replacement connection has already been established", this.garageDoorId);
             }
         } catch (e) {
             this.logger.error(e);
