@@ -27,9 +27,28 @@ class GarageDoorOpenerSocketHandler {
         this.socket = socket;
         this.garageDoorId = garageDoorId.toLowerCase();
         this.openingTimer = null;
+        this.closingTimer = null;
     }
 
     async triggerOpener() {
+        this.clearTimeouts();
+        const uow = new UoW();
+        const garageDoor = await uow.garageDoorsRepository.getGarageDoorById(this.garageDoorId);
+
+        if (garageDoor.status === "open" || garageDoor.status === "opening") {
+            this.closingTimer = setTimeout(async () => {
+                if (this.closingTimer != null) {
+                    await this.setStatus("open", 0);
+                    this.closingTimer = null;
+                }
+            }, config.closingTimespan);
+            await this.setStatus("closing", 0);
+        } else if (garageDoor.status === "closing") {
+            // if status is "closing" and we trigger the opener, we want it to be "opening"
+            // instead of duplicating logic, we just re-call onGarageDoorStatusUpdated
+            await this.onGarageDoorStatusUpdated(0);
+        }
+
         this.socket.emit("toggleGarageDoorState");
     }
 
@@ -52,50 +71,63 @@ class GarageDoorOpenerSocketHandler {
         }
     }
 
-    async onGarageDoorStatusUpdated(rawStatus) {
-
-        const setStatus = async (status) => {
-            const uow = new UoW();
-            await uow.beginTransaction();
-            try {
-                const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(this.garageDoorId);
-                garageDoor.status = status;
-                garageDoor.last_seen_date = new Date();
-                await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
-                const mostRecentGarageDoorStatusHistoryEntry = await uow.garageDoorsRepository.getMostRecentGarageDoorStatusHistoryEntryForGarageDoor(this.garageDoorId);
-                if (mostRecentGarageDoorStatusHistoryEntry == null || mostRecentGarageDoorStatusHistoryEntry.raw_status !== status) {
-                    const newGarageDoorStatusHistoryEntry = {
-                        garage_door_id: this.garageDoorId,
-                        status: garageDoor.status,
-                        raw_status: rawStatus,
-                        activity_date: new Date()
-                    };
-                    await uow.garageDoorsRepository.addGarageDoorStatusHistoryEntry(newGarageDoorStatusHistoryEntry);
-                }
-                await uow.commitTransaction();
-                getAllClients().forEach(x => x.sendGarageDoorUpdates());
-            } catch (e) {
-                this.logger.error(e);
-                await uow.rollbackTransaction();
+    async setStatus(status, rawStatus) {
+        this.logger.debug("setStatus", status, rawStatus);
+        const uow = new UoW();
+        await uow.beginTransaction();
+        try {
+            const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(this.garageDoorId);
+            garageDoor.status = status;
+            garageDoor.last_seen_date = new Date();
+            await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
+            const mostRecentGarageDoorStatusHistoryEntry = await uow.garageDoorsRepository.getMostRecentGarageDoorStatusHistoryEntryForGarageDoor(this.garageDoorId);
+            if (mostRecentGarageDoorStatusHistoryEntry == null || mostRecentGarageDoorStatusHistoryEntry.raw_status !== status) {
+                const newGarageDoorStatusHistoryEntry = {
+                    garage_door_id: this.garageDoorId,
+                    status: garageDoor.status,
+                    raw_status: rawStatus,
+                    activity_date: new Date()
+                };
+                await uow.garageDoorsRepository.addGarageDoorStatusHistoryEntry(newGarageDoorStatusHistoryEntry);
             }
-        };
+            await uow.commitTransaction();
+            getAllClients().forEach(x => x.sendGarageDoorUpdates());
+        } catch (e) {
+            this.logger.error(e);
+            await uow.rollbackTransaction();
+        }
+    }
 
-        let openingTimer = null;
+    clearTimeouts() {
+        if (this.openingTimer != null) {
+            clearTimeout(this.openingTimer);
+            this.openingTimer = null;
+        }
+        if (this.closingTimer != null) {
+            clearTimeout(this.closingTimer);
+            this.closingTimer = null;
+        }
+    }
 
+    async onGarageDoorStatusUpdated(rawStatus) {
+        this.logger.debug("onGarageDoorStatusUpdated", rawStatus);
         if (rawStatus === 0) {
-            if (openingTimer == null) {
-                await setStatus("opening");
+            if (this.openingTimer == null) {
+                this.clearTimeouts();
+                await this.setStatus("opening", rawStatus);
 
                 this.openingTimer = setTimeout(async () => {
-                    await setStatus("open");
-                    this.openingTimer = null;
+                    if (this.openingTimer != null) {
+                        await this.setStatus("open", 0);
+                        this.openingTimer = null;
+                    }
                 }, config.openingTimespan);
+            } else {
+                this.clearTimeouts();
             }
         } else {
-            await setStatus("closed");
-            if (this.openingTimer != null) {
-                clearTimeout(this.openingTimer);
-            }
+            this.clearTimeouts();
+            await this.setStatus("closed", rawStatus);
         }
 
     }
