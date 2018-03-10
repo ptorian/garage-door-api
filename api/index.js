@@ -8,6 +8,7 @@ require("winston-daily-rotate-file");
 const routes = require("./routes");
 const config = require("./config");
 const UoW = require("../db");
+const GarageDoorOpenerSocketHandler = require("./sockets/garageDoorOpenerSocketHandler");
 
 
 const appRawFileTransport = new winston.transports.DailyRotateFile({
@@ -149,91 +150,11 @@ function addExtensions(server) {
 function setupSocketIO(server) {
     server.app.logger.info("setting up socket.io");
     server.app.io = socketIO(server.listener);
-    server.app.socketsByGarageDoorId = {};
-
-    const onGarageDoorConnected = async (socket, garageDoorId) => {
-        try {
-            server.app.socketsByGarageDoorId[garageDoorId] = socket;
-            server.app.logger.info("socket.io connected", garageDoorId);
-            const uow = new UoW();
-            const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(garageDoorId);
-            return garageDoor;
-        } catch (e) {
-            server.app.logger.error(e);
-        }
-    };
-
-    const onGarageDoorHeartbeat = async (garageDoorId) => {
-        const uow = new UoW();
-        await uow.beginTransaction();
-        try {
-            const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(garageDoorId);
-            garageDoor.last_seen_date = new Date();
-            await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
-            await uow.commitTransaction();
-        } catch (e) {
-            server.app.logger.error(e);
-            await uow.rollbackTransaction();
-        }
-    }
-
-    const onGarageDoorStatusUpdated = async (garageDoorId, status) => {
-        const uow = new UoW();
-        await uow.beginTransaction();
-        try {
-            const garageDoor = await uow.garageDoorsRepository.ensureGarageDoorExists(garageDoorId);
-            garageDoor.status = status === 1 ? "closed" : "open";
-            garageDoor.last_seen_date = new Date();
-            await uow.garageDoorsRepository.updateGarageDoor(garageDoor);
-            const mostRecentGarageDoorStatusHistoryEntry = await uow.garageDoorsRepository.getMostRecentGarageDoorStatusHistoryEntryForGarageDoor(garageDoorId);
-            if (mostRecentGarageDoorStatusHistoryEntry == null || mostRecentGarageDoorStatusHistoryEntry.raw_status !== status) {
-                const newGarageDoorStatusHistoryEntry = {
-                    garage_door_id: garageDoorId,
-                    status: garageDoor.status,
-                    raw_status: status,
-                    activity_date: new Date()
-                };
-                await uow.garageDoorsRepository.addGarageDoorStatusHistoryEntry(newGarageDoorStatusHistoryEntry);
-            }
-            await uow.commitTransaction();
-        } catch (e) {
-            server.app.logger.error(e);
-            await uow.rollbackTransaction();
-        }
-    };
-
-    const onGarageDoorDisconnected = async (garageDoorId) => {
-        try {
-            if (server.app.socketsByGarageDoorId.hasOwnProperty(garageDoorId) && server.app.socketsByGarageDoorId[garageDoorId].id === socket.id) {
-                server.app.logger.info("socket.io disconnected", garageDoorId);
-                delete server.app.socketsByGarageDoorId[garageDoorId];
-            } else {
-                server.app.logger.info("socket.io disconnection ignored because replacement connection has already been established", garageDoorId);
-            }
-        } catch (e) {
-            server.app.logger.error(e);
-        }
-    };
 
     server.app.io.on("connection", socket => {
         socket.on("registerGarageDoorOpener", async garageDoorId => {
-            await onGarageDoorConnected(socket, garageDoorId);
-
-            socket.emit("getGarageDoorStatus", null, async status => {
-                await onGarageDoorStatusUpdated(garageDoorId, status);
-
-                socket.on("heartbeat", async () => {
-                    await onGarageDoorHeartbeat(garageDoorId);
-                });
-
-                socket.on("garageDoorStatus", async status => {
-                    await onGarageDoorStatusUpdated(garageDoorId, status);
-                });
-
-                socket.on("disconnect", async () => {
-                    await onGarageDoorDisconnected(garageDoorId, status);
-                });
-            });
+            const garageDoorOpenerSocketHandler = new GarageDoorOpenerSocketHandler(server.app.logger, socket, garageDoorId);
+            await garageDoorOpenerSocketHandler.onGarageDoorConnected();
         });
     });
 }
