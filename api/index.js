@@ -97,7 +97,7 @@ function addExtensions(server) {
         method: async (request, h) => {
             if (request.auth.isAuthenticated) {
                 const uow = await request.app.getNewUoW();
-                request.app.currentUser = await uow.usersRepository.getUserById(request.auth.credentials.currentUser.id);
+                request.app.currentUser = await uow.usersRepository.getUserById(request.auth.credentials.currentUserId);
             }
 
             return h.continue;

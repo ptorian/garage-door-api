@@ -18,7 +18,6 @@ const routes = [
         method: 'GET',
         path: '/users/{userId}',
         config: {
-            auth: false,
             validate: {
                 params: {
                     userId: Joi.number().integer().required()
