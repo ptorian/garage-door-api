@@ -30,26 +30,48 @@ class GarageDoorOpenerSocketHandler {
         this.closingTimer = null;
     }
 
-    async triggerOpener() {
-        this.clearTimeouts();
-        const uow = new UoW();
-        const garageDoor = await uow.garageDoorsRepository.getGarageDoorById(this.garageDoorId);
-
-        if (garageDoor.status === "open" || garageDoor.status === "opening") {
-            this.closingTimer = setTimeout(async () => {
-                if (this.closingTimer != null) {
-                    await this.setStatus("open", 0);
-                    this.closingTimer = null;
-                }
-            }, config.closingTimespan);
-            await this.setStatus("closing", 0);
-        } else if (garageDoor.status === "closing") {
-            // if status is "closing" and we trigger the opener, we want it to be "opening"
-            // instead of duplicating logic, we just re-call onGarageDoorStatusUpdated
-            await this.onGarageDoorStatusUpdated(0);
+    startOpeningTimer() {
+        if (this.closingTimer != null) {
+            this.logger.warn("closingTimer is running while starting openingTimer");
         }
+        this.openingTimer = setTimeout(async () => {
+            if (this.openingTimer != null) {
+                await this.setStatus("open", 0);
+                this.openingTimer = null;
+            }
+        }, config.openingTimespan);
+    }
 
-        this.socket.emit("toggleGarageDoorState");
+    startClosingTimer() {
+        if (this.openingTimer != null) {
+            this.logger.warn("openingTimer is running while starting closingTimer");
+        }
+        this.closingTimer = setTimeout(async () => {
+            if (this.closingTimer != null) {
+                await this.setStatus("open", 0);
+                this.closingTimer = null;
+            }
+        }, config.closingTimespan);
+    }
+
+    killOpeningTimer() {
+        if (this.openingTimer != null && this.closingTimer != null) {
+            this.logger.warn("both timers running is running while killing openingTimer");
+        }
+        if (this.openingTimer != null) {
+            clearTimeout(this.openingTimer);
+            this.openingTimer = null;
+        }
+    }
+
+    killClosingTimer() {
+        if (this.openingTimer != null && this.closingTimer != null) {
+            this.logger.warn("both timers running is running while killing closingTimer");
+        }
+        if (this.closingTimer != null) {
+            clearTimeout(this.closingTimer);
+            this.closingTimer = null;
+        }
     }
 
     async onConnect() {
@@ -68,6 +90,45 @@ class GarageDoorOpenerSocketHandler {
             });
         } catch (e) {
             this.logger.error(e);
+        }
+    }
+
+    async triggerOpener() {
+        this.logger.debug("opener triggered");
+
+        const uow = new UoW();
+        const garageDoor = await uow.garageDoorsRepository.getGarageDoorById(this.garageDoorId);
+
+        switch (garageDoor.status) {
+
+            case "closed":
+                // don't change status or start a timer here, that will happen
+                // when we get a signal from the raspberry pi that the garage
+                // door is opening
+                this.socket.emit("toggleGarageDoorState");
+                break;
+
+            case "open":
+                await this.setStatus("closing", 0);
+                this.socket.emit("toggleGarageDoorState");
+                this.startClosingTimer();
+                break;
+
+            case "opening":
+                this.killOpeningTimer();
+                await this.setStatus("closing", 0);
+                this.socket.emit("toggleGarageDoorState");
+                this.startClosingTimer();
+                break;
+
+            case "closing":
+                this.killClosingTimer();
+                await this.setStatus("opening", 0);
+                this.socket.emit("toggleGarageDoorState");
+                this.startOpeningTimer();
+                break;
+
+
         }
     }
 
@@ -98,38 +159,26 @@ class GarageDoorOpenerSocketHandler {
         }
     }
 
-    clearTimeouts() {
-        if (this.openingTimer != null) {
-            clearTimeout(this.openingTimer);
-            this.openingTimer = null;
-        }
-        if (this.closingTimer != null) {
-            clearTimeout(this.closingTimer);
-            this.closingTimer = null;
-        }
-    }
-
     async onGarageDoorStatusUpdated(rawStatus) {
         this.logger.debug("onGarageDoorStatusUpdated", rawStatus);
-        if (rawStatus === 0) {
-            if (this.openingTimer == null) {
-                this.clearTimeouts();
-                await this.setStatus("opening", rawStatus);
 
-                this.openingTimer = setTimeout(async () => {
-                    if (this.openingTimer != null) {
-                        await this.setStatus("open", 0);
-                        this.openingTimer = null;
-                    }
-                }, config.openingTimespan);
-            } else {
-                this.clearTimeouts();
+        const uow = new UoW();
+        const mostRecentGarageDoorStatusHistoryEntry = await uow.garageDoorsRepository.getMostRecentGarageDoorStatusHistoryEntryForGarageDoor(this.garageDoorId);
+
+        if ((mostRecentGarageDoorStatusHistoryEntry == null || mostRecentGarageDoorStatusHistoryEntry.raw_status === 1) && rawStatus === 0) {
+            // closed to open
+            this.logger.debug("sensor closed to open");
+            if (this.openingTimer == null) {
+                await this.setStatus("opening", rawStatus);
+                this.startOpeningTimer();
             }
-        } else {
-            this.clearTimeouts();
+        } else if ((mostRecentGarageDoorStatusHistoryEntry == null || mostRecentGarageDoorStatusHistoryEntry.raw_status === 0) && rawStatus === 1) {
+            // open to closed
+            this.logger.debug("sensor open to closed");
+            this.killOpeningTimer();
+            this.killClosingTimer();
             await this.setStatus("closed", rawStatus);
         }
-
     }
 
     async onGarageDoorHeartbeat() {
@@ -150,7 +199,7 @@ class GarageDoorOpenerSocketHandler {
     async onDisconnect() {
         try {
             if (garageDoorOpenerSocketHandlersByGarageDoorId.hasOwnProperty(this.garageDoorId) && garageDoorOpenerSocketHandlersByGarageDoorId[this.garageDoorId].socket.id === this.socket.id) {
-                logger.info("socket.io garage door disconnected", this.garageDoorId);
+                this.logger.info("socket.io garage door disconnected", this.garageDoorId);
                 delete garageDoorOpenerSocketHandlersByGarageDoorId[this.garageDoorId];
             } else {
                 this.logger.info("socket.io garage door disconnection ignored because replacement connection has already been established", this.garageDoorId);
