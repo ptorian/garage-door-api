@@ -17,7 +17,7 @@ class ClientSocketHandler {
     }
 
     async sendGarageDoorUpdates() {
-        this.logger.info("sending garage door updates");
+        this.logger.debug("sending garage door updates");
         const uow = new UoW();
         const garageDoors = await uow.garageDoorsRepository.getAllGarageDoors();
         this.socket.emit("garageDoorUpdates", garageDoors);
