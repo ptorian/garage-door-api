@@ -168,7 +168,7 @@ async function startServer() {
     try {
         const server = new Hapi.Server({
             host: "0.0.0.0",
-            port: 8000,
+            port: config.serverPort,
             routes: {
                 cors: {
                     origin: ["*"],
